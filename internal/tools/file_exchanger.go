@@ -18,7 +18,7 @@ func SaveData(tasks []entity.Task) error {
 	return nil
 }
 
-func LoadTasksFromFile(tr entity.TasksDTO) error {
+func LoadTasksFromFile(tr *entity.TasksDTO) error {
 
 	data, err := os.ReadFile("tasks.json")
 	if os.IsNotExist(err) {
