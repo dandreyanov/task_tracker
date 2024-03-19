@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"task_tracker/internal/entity"
-	"task_tracker/internal/service"
-	"task_tracker/internal/tools"
 )
 
 type TaskRoutes struct {
@@ -38,7 +36,6 @@ func (t *TaskRoutes) CreateTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "task created"})
-	err = tools.SaveData(t.TaskResponse.Tasks)
 	if err != nil {
 		c.JSON(http.StatusMultiStatus, gin.H{"error": err.Error()})
 	}
@@ -84,51 +81,53 @@ func (t *TaskRoutes) GetFilterTasks(c *gin.Context) {
 		return
 	}
 
-	filterTasks := make([]entity.Task, 0, len(t.TaskResponse.Tasks))
-
-	for _, task := range t.TaskResponse.Tasks {
-		if (task.Status == status) && (task.Priority == uint8(priority)) {
-			filterTasks = append(filterTasks, task)
-		}
+	rows, err := t.db.Query("SELECT * FROM tasks WHERE status = $1 AND priority = $2", status, priority)
+	if err != nil {
+		return
 	}
-	c.JSON(http.StatusOK, filterTasks)
+	var TaskResponse entity.TasksDTO
+	for rows.Next() {
+		var task entity.Task
+		err = rows.Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority)
+		if err != nil {
+			return
+		}
+		TaskResponse.Total = len(TaskResponse.Tasks)
+		TaskResponse.Tasks = append(TaskResponse.Tasks, task)
+	}
+	c.JSON(http.StatusOK, TaskResponse)
 }
 
 func (t *TaskRoutes) UpdateTask(c *gin.Context) {
 	id := c.Param("id")
-	ok, idx, task := service.GetTaskByID(id, t.TaskResponse)
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
-		return
-	}
-
+	var task entity.Task
+	t.TaskResponse.Tasks = append(t.TaskResponse.Tasks, task)
 	err := c.BindJSON(&task)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	t.TaskResponse.Tasks[idx] = task
-
+	_, errDb := t.db.Exec("UPDATE tasks SET title = $1, description = $2, status = $3, priority = $4 WHERE id = $5", task.Title, task.Description, task.Status, task.Priority, id)
+	rows, err := t.db.Query("SELECT * FROM tasks WHERE id = $1", id)
+	err = rows.Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority)
 	c.JSON(http.StatusOK, task)
-	err = tools.SaveData(t.TaskResponse.Tasks)
+	if errDb != nil {
+		c.JSON(http.StatusMultiStatus, gin.H{"error": errDb.Error()})
+	}
 	if err != nil {
-		c.JSON(http.StatusMultiStatus, gin.H{"error": err.Error()})
+		c.JSON(http.StatusMultiStatus, gin.H{"error": errDb.Error()})
 	}
 }
 
 func (t *TaskRoutes) DeleteTask(c *gin.Context) {
 	id := c.Param("id")
-	ok := service.DeleteTaskByID(id, t.TaskResponse)
-	if ok {
+	_, err := t.db.Exec("DELETE FROM tasks WHERE id = $1", id)
+	if err != nil {
+		c.JSON(http.StatusMultiStatus, gin.H{"error": err.Error()})
+	} else {
 		c.JSON(http.StatusOK, gin.H{"message": "task delete"})
-		err := tools.SaveData(t.TaskResponse.Tasks)
-		if err != nil {
-			c.JSON(http.StatusMultiStatus, gin.H{"error": err.Error()})
-		}
-		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "task not found"})
 }
 
 func (t *TaskRoutes) ListTasks(c *gin.Context) {
@@ -137,14 +136,25 @@ func (t *TaskRoutes) ListTasks(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
-	low := (page - 1) * 10
-	high := page * 10
-	if high > len(t.TaskResponse.Tasks) {
-		high = len(t.TaskResponse.Tasks)
+
+	rows, err := t.db.Query("SELECT * FROM tasks LIMIT $1 OFFSET $2", 10, (page-1)*10)
+	if err != nil {
+		return
 	}
-	res := t.TaskResponse.Tasks[low:high]
+	var TaskResponse entity.TasksDTO
+	for rows.Next() {
+		var task entity.Task
+		err = rows.Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority)
+		if err != nil {
+			return
+		}
+		TaskResponse.Tasks = append(TaskResponse.Tasks, task)
 
-	total := len(t.TaskResponse.Tasks)
-
-	c.JSON(http.StatusOK, gin.H{"tasks": res, "total": total})
+		count := t.db.QueryRow("SELECT COUNT(*) FROM tasks")
+		err := count.Scan(&TaskResponse.Total)
+		if err != nil {
+			return
+		}
+	}
+	c.JSON(http.StatusOK, TaskResponse)
 }

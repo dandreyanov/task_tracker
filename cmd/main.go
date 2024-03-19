@@ -9,7 +9,6 @@ import (
 	"task_tracker/config"
 	"task_tracker/internal/endpoints"
 	"task_tracker/internal/handlers"
-	"task_tracker/internal/tools"
 )
 
 var InitDB = `
@@ -25,7 +24,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	defer func(db *sql.DB) {
+		err := db.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}(db)
 
 	_, err = db.Exec(InitDB)
 	if err != nil {
@@ -37,16 +41,14 @@ func main() {
 		log.Fatal(err)
 	}
 	tasks := handlers.NewTaskRoutes(db)
-	err = tools.LoadTasksFromFile(&tasks.TaskResponse)
-	if err != nil {
-		log.Fatal(err)
-	}
+
 	r := gin.Default()
 
 	endpoints.InitEndpoints(r, tasks)
 
 	err = r.Run(viper.GetString("http.port"))
 	if err != nil {
+		log.Fatal(err)
 		return
 	}
 }
